@@ -16,6 +16,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/txpool"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/rpc"
 
 	"github.com/ethereum-optimism/optimism/op-service/txmgr/metrics"
 )
@@ -73,9 +74,9 @@ type ETHBackend interface {
 	NonceAt(ctx context.Context, account common.Address, blockNumber *big.Int) (uint64, error)
 	// PendingNonceAt returns the pending nonce.
 	PendingNonceAt(ctx context.Context, account common.Address) (uint64, error)
-	// EstimateGas returns an estimate of the amount of gas needed to execute the given
-	// transaction against the current pending block.
-	EstimateGas(ctx context.Context, msg ethereum.CallMsg) (uint64, error)
+	// EstimateGasAt returns an estimate of the amount of gas needed to execute the given
+	// transaction against the specified block.
+	EstimateGasAt(ctx context.Context, msg ethereum.CallMsg, blockNumber *big.Int) (uint64, error)
 }
 
 // SimpleTxManager is a implementation of TxManager that performs linear fee
@@ -196,13 +197,13 @@ func (m *SimpleTxManager) craftTx(ctx context.Context, candidate TxCandidate) (*
 		rawTx.Gas = candidate.GasLimit
 	} else {
 		// Calculate the intrinsic gas for the transaction
-		gas, err := m.backend.EstimateGas(ctx, ethereum.CallMsg{
+		gas, err := m.backend.EstimateGasAt(ctx, ethereum.CallMsg{
 			From:      m.cfg.From,
 			To:        candidate.To,
 			GasFeeCap: gasFeeCap,
 			GasTipCap: gasTipCap,
 			Data:      rawTx.Data,
-		})
+		}, big.NewInt(rpc.PendingBlockNumber.Int64()))
 		if err != nil {
 			return nil, fmt.Errorf("failed to estimate gas: %w", err)
 		}
@@ -467,13 +468,13 @@ func (m *SimpleTxManager) increaseGasPrice(ctx context.Context, tx *types.Transa
 	}
 
 	// Re-estimate gaslimit in case things have changed or a previous gaslimit estimate was wrong
-	gas, err := m.backend.EstimateGas(ctx, ethereum.CallMsg{
+	gas, err := m.backend.EstimateGasAt(ctx, ethereum.CallMsg{
 		From:      m.cfg.From,
 		To:        rawTx.To,
 		GasFeeCap: bumpedTip,
 		GasTipCap: bumpedFee,
 		Data:      rawTx.Data,
-	})
+	}, big.NewInt(rpc.PendingBlockNumber.Int64()))
 	if err != nil {
 		m.l.Warn("failed to re-estimate gas", "err", err, "gaslimit", tx.Gas())
 		return nil, err

@@ -14,6 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ethereum-optimism/optimism/op-bindings/bindings"
@@ -213,14 +214,14 @@ func (s *BasicUser[B]) LastTxReceipt(t Testing) *types.Receipt {
 // ActMakeTx makes a tx with the predetermined contents (see randomization and other actions)
 // and sends it to the tx pool
 func (s *BasicUser[B]) ActMakeTx(t Testing) {
-	gas, err := s.env.EthCl.EstimateGas(t.Ctx(), ethereum.CallMsg{
+	gas, err := s.env.EthCl.EstimateGasAt(t.Ctx(), ethereum.CallMsg{
 		From:      s.address,
 		To:        s.txToAddr,
 		GasFeeCap: s.txOpts.GasFeeCap,
 		GasTipCap: s.txOpts.GasTipCap,
 		Value:     s.TxValue(),
 		Data:      s.txCallData,
-	})
+	}, big.NewInt(rpc.PendingBlockNumber.Int64()))
 	require.NoError(t, err, "gas estimation should pass")
 	tx := types.MustSignNewTx(s.account, s.env.Signer, &types.DynamicFeeTx{
 		To:        s.txToAddr,
@@ -316,13 +317,13 @@ func (s *CrossLayerUser) ActDeposit(t Testing) {
 	depositGas := s.L2.txOpts.GasLimit
 	if s.L2.txOpts.GasLimit == 0 {
 		// estimate gas used by deposit
-		gas, err := s.L2.env.EthCl.EstimateGas(t.Ctx(), ethereum.CallMsg{
+		gas, err := s.L2.env.EthCl.EstimateGasAt(t.Ctx(), ethereum.CallMsg{
 			From:       s.L2.address,
 			To:         s.L2.txToAddr,
 			Value:      depositTransferValue, // TODO: estimate gas does not support minting yet
 			Data:       s.L2.txCallData,
 			AccessList: nil,
-		})
+		}, big.NewInt(rpc.PendingBlockNumber.Int64()))
 		require.NoError(t, err)
 		depositGas = gas
 	}

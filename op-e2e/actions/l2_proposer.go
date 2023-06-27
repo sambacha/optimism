@@ -13,6 +13,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ethereum-optimism/optimism/op-node/sources"
@@ -86,13 +87,13 @@ func (p *L2Proposer) sendTx(t Testing, data []byte) {
 	nonce, err := p.l1.NonceAt(t.Ctx(), p.address, nil)
 	require.NoError(t, err)
 
-	gasLimit, err := p.l1.EstimateGas(t.Ctx(), ethereum.CallMsg{
+	gasLimit, err := p.l1.EstimateGasAt(t.Ctx(), ethereum.CallMsg{
 		From:      p.address,
 		To:        &p.contractAddr,
 		GasFeeCap: gasFeeCap,
 		GasTipCap: gasTipCap,
 		Data:      data,
-	})
+	}, big.NewInt(rpc.PendingBlockNumber.Int64()))
 	require.NoError(t, err)
 
 	rawTx := &types.DynamicFeeTx{
