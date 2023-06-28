@@ -3,6 +3,7 @@ package actions
 import (
 	"crypto/ecdsa"
 	"errors"
+	"fmt"
 	"math/big"
 	"math/rand"
 
@@ -328,9 +329,28 @@ func (s *CrossLayerUser) ActDeposit(t Testing) {
 		depositGas = gas
 	}
 
+	// Finally send TX
+	s.L1.txOpts.GasLimit = 0
 	tx, err := s.L1.env.Bindings.OptimismPortal.DepositTransaction(&s.L1.txOpts, toAddr, depositTransferValue, depositGas, isCreation, s.L2.txCallData)
+	require.Nil(t, err, "with deposit tx")
+
+	// Estimate gas
+	gas, err := s.L1.env.EthCl.EstimateGasAt(t.Ctx(), ethereum.CallMsg{
+		From:       s.L1.txOpts.From,
+		To:         tx.To(),
+		Value:      tx.Value(),
+		Data:       tx.Data(),
+		AccessList: tx.AccessList(),
+	}, big.NewInt(rpc.PendingBlockNumber.Int64()))
+	require.NoError(t, err, "estimate deposit gas")
+	s.L1.txOpts.GasLimit = gas
+
+	tx, err = s.L1.env.Bindings.OptimismPortal.DepositTransaction(&s.L1.txOpts, toAddr, depositTransferValue, depositGas, isCreation, s.L2.txCallData)
 	require.NoError(t, err, "failed to create deposit tx")
 
+	s.L1.txOpts.GasLimit = 0
+
+	fmt.Printf("Gas limit: %v\n", tx.Gas())
 	// Send the actual tx (since tx opts don't send by default)
 	err = s.L1.env.EthCl.SendTransaction(t.Ctx(), tx)
 	require.NoError(t, err, "must send tx")

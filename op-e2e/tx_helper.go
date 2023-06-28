@@ -10,10 +10,12 @@ import (
 	"github.com/ethereum-optimism/optimism/op-bindings/bindings"
 	"github.com/ethereum-optimism/optimism/op-bindings/predeploys"
 	"github.com/ethereum-optimism/optimism/op-node/rollup/derive"
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/stretchr/testify/require"
 )
 
@@ -29,8 +31,26 @@ func SendDepositTx(t *testing.T, cfg SystemConfig, l1Client *ethclient.Client, l
 	require.Nil(t, err)
 
 	// Finally send TX
+	l1Opts.NoSend = true
 	tx, err := depositContract.DepositTransaction(l1Opts, l2Opts.ToAddr, l2Opts.Value, l2Opts.GasLimit, l2Opts.IsCreation, l2Opts.Data)
 	require.Nil(t, err, "with deposit tx")
+
+	// Estimate gas
+	gas, err := l1Client.EstimateGasAt(context.Background(), ethereum.CallMsg{
+		From:       l1Opts.From,
+		To:         tx.To(),
+		Value:      tx.Value(),
+		Data:       tx.Data(),
+		AccessList: tx.AccessList(),
+	}, big.NewInt(rpc.PendingBlockNumber.Int64()))
+	require.NoError(t, err, "estimate deposit gas")
+	l1Opts.NoSend = false
+	l1Opts.GasLimit = gas
+
+	// Now resend with gas specified
+	tx, err = depositContract.DepositTransaction(l1Opts, l2Opts.ToAddr, l2Opts.Value, l2Opts.GasLimit, l2Opts.IsCreation, l2Opts.Data)
+	require.Nil(t, err, "with deposit tx")
+	l1Opts.GasLimit = 0
 
 	// Wait for transaction on L1
 	receipt, err := waitForTransaction(tx.Hash(), l1Client, 10*time.Duration(cfg.DeployConfig.L1BlockTime)*time.Second)
