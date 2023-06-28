@@ -92,10 +92,13 @@ func (r *faultResponder) Respond(ctx context.Context, response Claim) error {
 	// Send the transaction through the txmgr queue.
 	receiptsCh := make(chan txmgr.TxReceipt[TxData])
 	queue := txmgr.NewQueue[TxData](ctx, r.txMgr, r.MaxPendingTransactions)
-	err = sendTransaction(txData, queue, receiptsCh)
-	if err != nil {
-		return err
+	candidate := txmgr.TxCandidate{
+		To:     txData.Destination(),
+		TxData: txData.Bytes(),
+		// Setting GasLimit to 0 performs gas estimation online through the [txmgr].
+		GasLimit: 0,
 	}
+	queue.Send(txData, candidate, receiptsCh)
 
 	// Block until the transaction receipt is received.
 	r.handleReceipts(ctx, receiptsCh)
@@ -110,6 +113,7 @@ func (r *faultResponder) handleReceipts(ctx context.Context, receiptsCh chan txm
 		select {
 		case rec := <-receiptsCh:
 			r.log.Info("responder received receipt", "txHash", rec.Receipt.TxHash, "status", rec.Receipt.Status)
+			return
 		case <-r.shutdownCtx.Done():
 			r.log.Info("closing responder receipt handler")
 			return
@@ -153,20 +157,4 @@ type TxData interface {
 type TxQueue interface {
 	// Send sends a transaction to the queue.
 	Send(txdata TxData, candidate txmgr.TxCandidate, receiptsCh chan txmgr.TxReceipt[TxData])
-}
-
-// sendTransaction creates & submits a transaction using the provided [TxData].
-// Under the hood, it uses the challenger's [txmgr] to handle transaction sending.
-// Gas estimation is performed using go-ethereum's core IntrinsicGas estimation function.
-// This is a blocking method. It should not be called concurrently.
-func sendTransaction(txdata TxData, queue TxQueue, receiptsCh chan txmgr.TxReceipt[TxData]) error {
-	candidate := txmgr.TxCandidate{
-		To:     txdata.Destination(),
-		TxData: txdata.Bytes(),
-		// Setting GasLimit to 0 performs gas estimation online through the [txmgr].
-		GasLimit: 0,
-	}
-	queue.Send(txdata, candidate, receiptsCh)
-
-	return nil
 }
