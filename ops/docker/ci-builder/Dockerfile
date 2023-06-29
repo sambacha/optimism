@@ -1,30 +1,43 @@
-FROM debian:bullseye-20220822-slim as foundry-build
+# syntax=docker/dockerfile:1.4
+FROM rust:1.61.0-slim-bullseye AS foundry-build
 
 SHELL ["/bin/bash", "-c"]
 
-WORKDIR /opt
-
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && \
-    apt-get install -y curl build-essential git && \
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs > rustup.sh && \
-    chmod +x ./rustup.sh && \
-    ./rustup.sh -y
+RUN set -eux; \
+    apt-get update; apt-get install -y --assume-yes --no-install-recommends curl build-essential git ca-certificates \
+    rm -rf /var/lib/apt/lists/*;
 
 # move the foundryrc file to the foundry dir
 WORKDIR /opt/foundry
 COPY ../../.foundryrc ./.foundryrc
-
+    
 # Only diff from upstream docker image is this clone instead
 # of COPY. We select a specific commit to use.
 RUN git clone https://github.com/foundry-rs/foundry.git . \
   && git checkout $(cat .foundryrc)
 
-RUN source $HOME/.profile && \
-    cargo build --release && \
+
+ENV CARGO_HOME=/opt/foundry/.cargo
+ENV PATH=$PATH:/opt/foundry/.cargo/.cargo/bin
+
+RUN source $HOME/.profile 
+RUN --mount=type=cache,target=/root/.cargo/git/db \
+    --mount=type=cache,target=/root/.cargo/registry/cache \
+    --mount=type=cache,target=/root/.cargo/registry/index \
+    cargo fetch
+ARG TARGETPLATFORM
+RUN --mount=type=cache,target=/root/.cargo/git/db \
+    --mount=type=cache,target=/root/.cargo/registry/cache \
+    --mount=type=cache,target=/root/.cargo/registry/index \
+    --mount=type=cache,target=/opt/foundry/target \
+    cargo build --release --path . --locked; \
     strip /opt/foundry/target/release/forge && \
     strip /opt/foundry/target/release/cast && \
     strip /opt/foundry/target/release/anvil
+
+RUN rm -rf ./target/release/deps/
+RUN rm -rf ./target/release/build/
 
 FROM ethereum/client-go:alltools-v1.10.25 as geth
 
@@ -42,8 +55,8 @@ COPY --from=foundry-build /opt/foundry/target/release/anvil /usr/local/bin/anvil
 COPY --from=geth /usr/local/bin/abigen /usr/local/bin/abigen
 COPY --from=echidna-test /usr/local/bin/echidna-test /usr/local/bin/echidna-test
 
-RUN apt-get update && \
-  apt-get install -y bash curl openssh-client git build-essential ca-certificates jq musl gnupg coreutils && \
+RUN set -eux; \
+  apt-get update && apt-get install -y bash curl openssh-client git build-essential ca-certificates jq musl gnupg coreutils && \
   curl -sL https://deb.nodesource.com/setup_16.x -o nodesource_setup.sh && \
   curl -sL https://go.dev/dl/go1.19.linux-amd64.tar.gz -o go1.19.linux-amd64.tar.gz && \
   tar -C /usr/local/ -xzvf go1.19.linux-amd64.tar.gz && \
